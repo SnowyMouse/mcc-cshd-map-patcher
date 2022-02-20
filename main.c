@@ -61,7 +61,7 @@ int main(int argc, const char **argv) {
     
     // Is it an MCC CEA map?
     if(*(uint32_t *)(data + 0x4) != 13) {
-        fprintf(stderr, "%s is not a MCC CEA cache file.\nThis will not work on non-MCC CEA maps.\n", argv[1]);
+        fprintf(stderr, "%s is not an MCC CEA cache file.\nThis will not work on non-MCC CEA maps.\n", argv[1]);
         goto cleanup;
     }
     
@@ -98,20 +98,13 @@ int main(int argc, const char **argv) {
         uint32_t tag_count = *(uint32_t *)(tag_data + 0xC);
         CHECK_PTR_ASSERT(*(uint32_t *)(tag_data), tag_count * TAG_SIZE);
         uint8_t *tag_array = TRANSLATE_PTR(*(uint32_t *)(tag_data));
-        
-        // Go through each tag really quickly
+
+        // Look for a pistol. Also ensure all paths are valid.
         for(uint32_t t = 0; t < tag_count; t++) {
             uint8_t *tag = tag_array + t * TAG_SIZE;
-            if(*(uint32_t *)tag != 'weap') {
-                continue;
-            }
             uint32_t tag_path_pointer = *(uint32_t *)(tag + 0x10);
             uint32_t tag_path_pointer_test = tag_path_pointer;
             const char *tag_path;
-            size_t tag_path_length;
-            
-            CHECK_PTR_ASSERT(tag_path_pointer, 1);
-            tag_path = (const char *)TRANSLATE_PTR(tag_path_pointer);
             
             // Make sure the paths are valid
             while(1) {
@@ -123,6 +116,33 @@ int main(int argc, const char **argv) {
                     break;
                 }
             }
+
+            tag_path = (const char *)TRANSLATE_PTR(tag_path_pointer);
+
+            if(strcmp(tag_path, PISTOL_PATH) == 0 && pistol_address == 0) {
+                pistol_address = tag_path_pointer;
+            }
+        }
+
+        // Destruction rains from the heavens
+        if(!undo && pistol_address == 0) {
+            // Lavos destroyed the world. Oops.
+            fprintf(stderr, "No tag " PISTOL_PATH " was found in %s\n", argv[1]);
+            goto cleanup;
+        }
+        
+        // Go through each tag really quickly
+        for(uint32_t t = 0; t < tag_count; t++) {
+            uint8_t *tag = tag_array + t * TAG_SIZE;
+            if(*(uint32_t *)tag != 'weap') {
+                continue;
+            }
+            uint32_t tag_path_pointer = *(uint32_t *)(tag + 0x10);
+            const char *tag_path;
+            size_t tag_path_length;
+            
+            CHECK_PTR_ASSERT(tag_path_pointer, 1);
+            tag_path = (const char *)TRANSLATE_PTR(tag_path_pointer);
             
             // Ignore these
             if(is_ignored(tag_path)) {
@@ -154,39 +174,31 @@ int main(int argc, const char **argv) {
                 }
             }
             
-            // Check if this is the pistol
+            // Check if this is patched
             else if(!undo) {
-                if(strcmp(tag_path, PISTOL_PATH) == 0) {
-                    if(pistol_address == 0) {
-                        pistol_address = tag_path_pointer;
+                bool is_patched = *(uint32_t *)(tag + 0x1C) != 0;
+
+                if(is_patched) {
+                    if(strcmp(tag_path, PISTOL_PATH) == 0) {
+                        fprintf(stderr, "%s appears to already be patched. Use 'undo' to undo.\n", argv[1]);
                     }
                     else {
-                        fprintf(stderr, "%s is already patched. Use 'undo' to undo.\n", argv[1]);
-                        goto cleanup;
+                        fprintf(stderr, "%s has been modified by a tool that wasn't this one.\n", argv[1]);
                     }
-                }
-                else if(*(uint32_t *)(tag + 0x1C) != 0) {
-                    fprintf(stderr, "%s has been modified by a tool that wasn't this one.\n", argv[1]);
                     goto cleanup;
                 }
             }
         }
         
-        // Destruction rains from the heavens
+        // Patch it!
         if(!undo) {
-            // Lavos destroyed the world. Oops.
-            if(pistol_address == 0) {
-                fprintf(stderr, "No tag " PISTOL_PATH ".weapon was found in %s\n", argv[1]);
-                goto cleanup;
-            }
-            
             // Go through each tag and move the pistol path here
             for(uint32_t t = 0; t < tag_count; t++) {
                 uint8_t *tag = tag_array + t * TAG_SIZE;
                 if(*(uint32_t *)tag != 'weap') {
                     continue;
                 }
-                const char *tag_path = TRANSLATE_PTR(*(uint32_t *)(tag + 0x10));
+                const char *tag_path = (const char *)TRANSLATE_PTR(*(uint32_t *)(tag + 0x10));
                 
                 // If it's ignored, drop it
                 if(is_ignored(tag_path)) {
